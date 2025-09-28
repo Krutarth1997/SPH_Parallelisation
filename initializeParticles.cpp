@@ -1,8 +1,9 @@
 #include <Eigen/Dense>
 #include <iostream>
 #include "initializeParticles.h"
+#include <mpi.h>
 
-Eigen::MatrixXf generateBoxFlow(Eigen::MatrixXf& positions, Eigen::MatrixXf& velocities)
+std::pair<Eigen::MatrixXf, Eigen::MatrixXf> generateBoxFlow(Eigen::MatrixXf& positions, Eigen::MatrixXf& velocities)
 {
     float offset_z = 7.0e-6;
     int n_height = 5; //6
@@ -40,10 +41,10 @@ Eigen::MatrixXf generateBoxFlow(Eigen::MatrixXf& positions, Eigen::MatrixXf& vel
             }  
         }
 
-    return positions, velocities;
+    return std::make_pair(positions, velocities);
 }
 
-Eigen::MatrixXf generateSphericalParticles(Eigen::MatrixXf& positions, Eigen::MatrixXf& velocities)
+std::pair<Eigen::MatrixXf, Eigen::MatrixXf> generateSphericalParticles(Eigen::MatrixXf& positions, Eigen::MatrixXf& velocities)
 {
 	//Position of generated droplet
     float pos_x = -5.0e-6;
@@ -51,6 +52,7 @@ Eigen::MatrixXf generateSphericalParticles(Eigen::MatrixXf& positions, Eigen::Ma
     float pos_z = 0.0e-6;
 
     std::cout << "\nFluidpartikel initialisieren...";
+
     srand(time(0));
 
     int numParticles = positions.rows();
@@ -72,11 +74,10 @@ Eigen::MatrixXf generateSphericalParticles(Eigen::MatrixXf& positions, Eigen::Ma
             ++index_nr;
         }
     }
-
-    return positions, velocities;
+    return std::make_pair(positions, velocities);
 }
 
-Eigen::MatrixXf generateSemiSphericalParticles(Eigen::MatrixXf& positions, Eigen::MatrixXf& velocities)
+std::pair<Eigen::MatrixXf, Eigen::MatrixXf> generateSemiSphericalParticles(Eigen::MatrixXf& positions, Eigen::MatrixXf& velocities)
 {
     float pos_x = 0.0e-6;
     float pos_y = 0.0e-6;
@@ -104,10 +105,10 @@ Eigen::MatrixXf generateSemiSphericalParticles(Eigen::MatrixXf& positions, Eigen
 	    }
     }
 
-    return positions, velocities;
+    return std::make_pair(positions, velocities);
 }
 
-Eigen::MatrixXf generateVerticalFibreFluid(Eigen::MatrixXf& positions, Eigen::MatrixXf& velocities)
+std::pair<Eigen::MatrixXf, Eigen::MatrixXf> generateVerticalFibreFluid(Eigen::MatrixXf& positions, Eigen::MatrixXf& velocities)
 {
     //-----------Geometrieeinstellungen vertikale Faser (Fluid)----------
     int num_height = 20;
@@ -142,10 +143,10 @@ Eigen::MatrixXf generateVerticalFibreFluid(Eigen::MatrixXf& positions, Eigen::Ma
         }
     }
 
-    return positions, velocities;
+    return std::make_pair(positions, velocities);
 }
 
-Eigen::MatrixXf generateNewParticlesDroplet(Eigen::MatrixXf& positions, Eigen::MatrixXf& velocities, int n_new_particles)
+std::pair<Eigen::MatrixXf, Eigen::MatrixXf> generateNewParticlesDroplet(Eigen::MatrixXf& positions, Eigen::MatrixXf& velocities, int n_new_particles)
 {
     Eigen::MatrixXf new_positions(n_new_particles, 3);
     
@@ -153,7 +154,8 @@ Eigen::MatrixXf generateNewParticlesDroplet(Eigen::MatrixXf& positions, Eigen::M
     float pos_y = 7.0e-6;
     float pos_z = 5.0e-6;
 
-    std::cout << "\nFluidpartikel initialisieren...\n";
+    std::cout << "\nNeu Fluidpartikel initialisieren...";
+
     srand(time(0));
 
     int index_nr = 0;
@@ -190,11 +192,10 @@ Eigen::MatrixXf generateNewParticlesDroplet(Eigen::MatrixXf& positions, Eigen::M
     new_vel_matrix.block(0, 0, velocities.rows(), velocities.cols()) = velocities;
     new_vel_matrix.block(velocities.rows(), 0, new_velocities.rows(), new_velocities.cols()) = new_velocities;
     velocities = new_vel_matrix;
-
-    return positions, velocities;
+    return std::make_pair(positions, velocities);
 }
 
-Eigen::MatrixXf generateWettedFibreHorizontal(Eigen::MatrixXf& positions, Eigen::MatrixXf& velocities)
+std::pair<Eigen::MatrixXf, Eigen::MatrixXf> generateWettedFibreHorizontal(Eigen::MatrixXf& positions, Eigen::MatrixXf& velocities)
 {
     float pos_x = -3.0e-6;
     float pos_y = 0.0e-6;
@@ -223,5 +224,5 @@ Eigen::MatrixXf generateWettedFibreHorizontal(Eigen::MatrixXf& positions, Eigen:
         }
     }
 
-    return positions, velocities;
+    return std::make_pair(positions, velocities);
 }

@@ -7,7 +7,12 @@
 #include <random>
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
+#include <thread>
 #include <chrono>
+#include <mpi.h>
+#include <filesystem>
+#include <sstream>
+#include <algorithm>
 //---------------Include Bibliotheken---------------
 
 //-------------Include external Header-------------
@@ -18,6 +23,8 @@
 #include "calculatePhysics.h"
 #include "kernel.h"
 #include "DynamicVariables.h"
+#include "gather.h"
+#include "updateTime.h"
 //-------------Include externe Header--------------
 
 //------------Physical Properties Fluid-----------
@@ -79,227 +86,377 @@ const float NORM_CUBIC_SPLINE = 8 / (3.14159265f * std::pow(SMOOTHING_LENGTH, 3)
 //------------Kernel normalization factors-----------
 
 //------------Boundaries of calculation domain------ (Particles outside the boundaries get deleted)
-Eigen::RowVector2f DOMAIN_X_LIM(-10.0e-6, 10.0e-6);
-Eigen::RowVector2f DOMAIN_Y_LIM(-10.0e-6, 10.0e-6);
-Eigen::RowVector2f DOMAIN_Z_LIM(-10.0e-6, 10.0e-6);
+Eigen::RowVector2f DOMAIN_X_LIM(-10.0e-4, 10.0e-4);
+Eigen::RowVector2f DOMAIN_Y_LIM(-10.0e-4, 10.0e-4);
+Eigen::RowVector2f DOMAIN_Z_LIM(-10.0e-4, 10.0e-4);
 //------------Boundaries of calculation domain------
 
 
 int main(int argc, char *argv[])
 {
-	//Set the name of the data folder
-    std::string foldername = "Test_01";
+    //MPI Initialization
+    MPI_Init(&argc, &argv);
 
-    //Start of timekeeping
-    auto start = std::chrono::high_resolution_clock::now();
+    //current processor, total parallel processors, MPI communicator
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    //----------------Properties of surrounding gas flow----------------
-    const float cw = 0.5; //Drag-Coefficient
-    const float density_gas = 1.225;
-    Eigen::Matrix<float, 1, 3> velocity_gas; //Velocity of sorrounding gas (uniform velocity profile)
-    velocity_gas << 0.1f, 0.0f, 0.0f;
-	//----------------Properties of surrounding gas flow----------------
+    try{
+        std::cout << "Process started with " << rank << " processor out of " << size << " total processesor" << std::endl;
 
-    //Definition of a constant gravitational force
-    Eigen::Matrix<float, 1, 3> CONSTANT_FORCE;
-    CONSTANT_FORCE << 0.0f, -1.09e-15, 0.0f; //-1.79e-15 it's so small because it gets divided by mass
+        // //Set the name of the data folder
+        // std::string foldername = "Test_MPI_1";
 
-    //----------------Specify the flow type-----------------
-    bool boolVerticalFibreCoated = false;
-    bool boolBoxFlow = false;
-    bool boolSphericalParticles = true; //-> Spherical particle droplet next to the fibre gets initialized
-    bool boolSemiSphericalParticles = false;
-    bool boolWettedHorizontalFibre = false;
-	//----------------Specify the flow type-----------------
-
-    //----------------Specify the boundary type-------------
-    bool boolPlane = false;
-    bool boolVerticalFibre = false;
-    bool boolHorizontalFibre = false;
-    bool boolImportSTL = true; //-> Import the Fibre as a STL data (Fibre.stl)
-	//----------------Specify the boundary type-------------
-
-    //----------------Number of particles-------------------
-    int n_particlesFibre = 5000; //choose a high number, because it gets reduced if the stl contains less Fibre-Particles
-    int n_particles = 200; //With spherical particles: It creates a spherical droplet with n particles inside
-
-    //----------------Matrix definitions--------------------
-    Eigen::VectorXf densitiesFibre(n_particlesFibre);  
-    densitiesFibre.setZero();
-
-    Eigen::MatrixXf positions(n_particles, 3); //Particle Positions (X,Y,Z)
-    Eigen::MatrixXf velocities(n_particles, 3); //Particle Velocities (u,w,v)
-
-    Eigen::MatrixXf positionsFibre(n_particlesFibre, 3); //Fibre Positions (x,y,z)
-    Eigen::MatrixXf velocitiesFibre(n_particlesFibre, 3); //Fibre Velocities (u,v,w: normaly = 0)
-	//----------------Matrix definitions--------------------
-
-	//Start iteration process from t=0....sim_time
-	int iter = 0;
-    int count = 1;
-
-    while (CURR_TIME <= SIM_TIME)
-    {
-        //-------------Initialize Fluid Particles in first iteration-----------
-        if (iter == 0)
-        {
-            if (boolBoxFlow) positions, velocities = generateBoxFlow(positions, velocities); //from your SPH-Neighbour-Search
-            else if (boolVerticalFibreCoated) positions, velocities = generateVerticalFibreFluid(positions, velocities);
-	        else if (boolSphericalParticles) positions, velocities = generateSphericalParticles(positions, velocities); //Is used here!
-            else if (boolSemiSphericalParticles) positions, velocities = generateSemiSphericalParticles(positions, velocities);
-            else if (boolWettedHorizontalFibre) positions, velocities = generateWettedFibreHorizontal(positions, velocities);
+        // Check if a folder name was passed as a command-line argument
+        std::string foldername = "Test_MPI"; // Default name
+        if (argc > 1) {
+            foldername = argv[1]; // Use the argument for folder name if provided
         }
-		//-------------Initialize Fluid Particles in first iteration-----------
-		
-        //-------------Reinitialize Particles if boolAddparticles==true---------
-        if ((iter != 0) && (iter % ADD_PARTICLES == 0) && (boolAddParticles))
-        {  
-            positions, velocities = generateNewParticlesDroplet(positions, velocities, N_NEW_PARTICLES);
-            n_particles += N_NEW_PARTICLES;
-        }
-		//-------------Reinitialize Particles if boolAddparticles==true---------
 
-        //-------------Initialize Geometry Particles---------------------------
-        if (iter == 0)
+        // Base folder where data is stored
+        std::string mainfolder = "/home/m2130800/SPH-Parallelisation/SPH_3D_lin_MPI/execution/";
+
+        // Create the complete directory for particles and fibres
+        std::string folderending_part = "/particles/";
+        std::string folderending_fibre = "/fibre/";
+
+        // Create the full path for particles and fibre folders
+        std::string particleFolder = mainfolder + foldername + folderending_part;
+        std::string fibreFolder = mainfolder + foldername + folderending_fibre;
+
+        // Create directories for particles and fibres if they don't exist
+        if (rank == 0) {
+            std::filesystem::create_directories(particleFolder); // Recursively create particle directory
+            std::filesystem::create_directories(fibreFolder);    // Recursively create fibre directory
+        }
+
+        float starttime, finishtime; // Variables to track the time taken by the program
+
+        // Closing the barrier for the timing
+        MPI_Barrier(MPI_COMM_WORLD);
+        starttime = MPI_Wtime();
+
+        //----------------Properties of surrounding gas flow----------------
+        const float cw = 0.5; //Drag-Coefficient
+        const float density_gas = 1.225;
+        Eigen::Matrix<float, 1, 3> velocity_gas; //Velocity of sorrounding gas (uniform velocity profile)
+        velocity_gas << 0.1f, 0.0f, 0.0f;
+        //----------------Properties of surrounding gas flow----------------
+
+        //Definition of a constant gravitational force
+        Eigen::Matrix<float, 1, 3> CONSTANT_FORCE;
+        CONSTANT_FORCE << 0.0f, -1.09e-15, 0.0f; //-1.79e-15 it's so small because it gets divided by mass
+
+        //----------------Specify the flow type-----------------
+        bool boolVerticalFibreCoated = false;
+        bool boolBoxFlow = false;
+        bool boolSphericalParticles = true; //-> Spherical particle droplet next to the fibre gets initialized
+        bool boolSemiSphericalParticles = false;
+        bool boolWettedHorizontalFibre = false;
+        //----------------Specify the flow type-----------------
+
+        //----------------Specify the boundary type-------------
+        bool boolPlane = false;
+        bool boolVerticalFibre = false;
+        bool boolHorizontalFibre = false;
+        bool boolImportSTL = true; //-> Import the Fibre as a STL data (Fibre.stl)
+        bool boolmovementFibre = false; //If fibre have movements
+        //----------------Specify the boundary type-------------
+
+        //----------------Number of particles-------------------
+        int n_particlesFibre = 5000; //choose a high number, because it gets reduced if the stl contains less Fibre-Particles
+        int n_particles = 200; //With spherical particles: It creates a spherical droplet with n particles inside
+
+        //----------------Matrix definitions--------------------
+        Eigen::MatrixXf positions(n_particles, 3); //Particle Positions (X,Y,Z)
+        Eigen::MatrixXf velocities(n_particles, 3); //Particle Velocities (u,w,v)
+
+        Eigen::MatrixXf positionsFibre(n_particlesFibre, 3); //Fibre Positions (x,y,z)
+        Eigen::MatrixXf velocitiesFibre(n_particlesFibre, 3); //Fibre Velocities (u,v,w: normaly = 0)
+        //----------------Matrix definitions--------------------
+
+        //Start iteration process from t=0....sim_time
+        int iter = 0;
+        //Root Processor is 0
+        //-------------Initialize Fluid Particles in first iteration at rank 0-----------
+        if (rank == 0)
         {
-            if (boolPlane) positionsFibre, velocitiesFibre = generateFlatSurface(positionsFibre, velocitiesFibre);
-            else if (boolVerticalFibre) positionsFibre, velocitiesFibre = generateVerticalFibre(positionsFibre, velocitiesFibre);
-            else if (boolHorizontalFibre) positionsFibre, velocitiesFibre = generateHorizontalFibre(positionsFibre, velocitiesFibre);
-            else if (boolImportSTL) positionsFibre, velocitiesFibre = generateSTLFibre(positionsFibre, velocitiesFibre, &n_particlesFibre); //Is used here
+            if (boolBoxFlow){ std::tie(positions, velocities) = generateBoxFlow(positions, velocities); } //from your SPH-Neighbour-Search
+            else if (boolVerticalFibreCoated) { std::tie(positions, velocities) = generateVerticalFibreFluid(positions, velocities); }
+            else if (boolSphericalParticles){std::tie(positions, velocities) = generateSphericalParticles(positions, velocities);}//Is used here!
+            else if (boolSemiSphericalParticles){std::tie(positions, velocities) = generateSemiSphericalParticles(positions, velocities);}
+            else if (boolWettedHorizontalFibre){std::tie(positions, velocities) = generateWettedFibreHorizontal(positions, velocities);}
+        }
+        //-------------Initialize Fluid Particles in first iteration at rank 0-----------
+        
+        //-------------Initialize Geometry Particles at rank 0-------------------
+        if (rank == 0)
+        {
+            if (boolPlane){std::tie(positionsFibre, velocitiesFibre) = generateFlatSurface(positionsFibre, velocitiesFibre);} 
+            else if (boolVerticalFibre){std::tie(positionsFibre, velocitiesFibre) = generateVerticalFibre(positionsFibre, velocitiesFibre);} 
+            else if (boolHorizontalFibre){std::tie(positionsFibre, velocitiesFibre) = generateHorizontalFibre(positionsFibre, velocitiesFibre);}
+            else if (boolImportSTL){std::tie(positionsFibre, velocitiesFibre) = generateSTLFibre(positionsFibre, velocitiesFibre, &n_particlesFibre);}//Is used here
             std::cout << "\nGeometrie erstellt.\n";
         }
-		//-------------Initialize Geometry Particles---------------------------
+        //-------------Initialize Geometry Particles at rank 0-------------------
 
-	//-----------------Just some displayed information in the terminal---------
-	if (iter == 0)
-	{   
-	    std::cout << "\nFluidpartikel: " << n_particles;
-	    std::cout << "\nFaserpartikel: " << n_particlesFibre;
-	    std::cout << "\nInitiierter Timestep: " << TIME_STEP_LENGTH << " (Co <= " << COURANT << ")";
-	    std::cout << "\nSimulationszeit: " << SIM_TIME << "\n\n";
-	}
-	//-----------------Just some displayed information in the terminal---------
+        // Broadcast n_particles Fibre to all processes
+        MPI_Bcast(&n_particlesFibre, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-        //------------Calculate physical Properties of geometry----------------
-        if (iter == 0)
-        {
-            std::cout << "\nNachbarschaftspartikel + Abstandsvektoren erstellen \n";
+        // Resize matrices based on the new n_particlesFibre
+        positionsFibre.conservativeResize(n_particlesFibre, 3);
+        velocitiesFibre.conservativeResize(n_particlesFibre, 3);
 
+        // Closing the barrier after Bcast n_particlesFibre and resize variables
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // Broadcast base variables of Fibre and fluid to all processes
+        MPI_Bcast(positions.data(), n_particles * 3, MPI_FLOAT, 0, MPI_COMM_WORLD);
+        MPI_Bcast(velocities.data(), n_particles * 3, MPI_FLOAT, 0, MPI_COMM_WORLD);
+        MPI_Bcast(positionsFibre.data(), n_particlesFibre * 3, MPI_FLOAT, 0, MPI_COMM_WORLD);
+        MPI_Bcast(velocitiesFibre.data(), n_particlesFibre * 3, MPI_FLOAT, 0, MPI_COMM_WORLD);
+
+        std::cout<<"Bcast successful for rank "<<rank<<std::endl;
+
+        int count = 1;
+
+        while (CURR_TIME <= SIM_TIME)
+        {  
+            //-------------Reinitialize Particles if boolAddparticles==true---------
+            if ((iter != 0) && (iter % ADD_PARTICLES == 0) && (boolAddParticles))
+            {  
+                std::tie(positions, velocities) = generateNewParticlesDroplet(positions, velocities, N_NEW_PARTICLES);
+                n_particles += N_NEW_PARTICLES;
+            }
+            //-------------Reinitialize Particles if boolAddparticles==true---------
+
+            //-------------Initialize start and end for each processor---------
+            //For Fluid: start and end for each rank
+            int blockSize = n_particles / size;
+            int start = rank * blockSize;
+            int end = (rank == size - 1) ? n_particles - 1 : start + blockSize - 1; //if last processor then total particles - 1
+
+            //For Fibre: start and end for each rank
+            int blockSizeFibre = n_particlesFibre / size;
+            int startFibre = rank * blockSizeFibre;
+            int endFibre = (rank == size - 1) ? n_particlesFibre - 1 : startFibre + blockSizeFibre - 1;
+            //-------------Initialize start and end for each processor---------
+            
+            //-----------------Displaying Initial information in the terminal---------
+            if ((iter == 0) && (rank == 0))
+            {   
+                std::cout << "\nFluidpartikel: " << n_particles;
+                std::cout << "\nFaserpartikel: " << n_particlesFibre;
+                std::cout << "\nInitiierter Timestep: " << TIME_STEP_LENGTH << " (Co <= " << COURANT << ")";
+                std::cout << "\nSimulationszeit: " << SIM_TIME << "\n\n";
+            }
+            //-----------------Displaying Initial information in the terminal---------
+
+            //------------Calculate physical Properties of geometry----------------
             //Vorbereitung Nachbar-Suche
             //Nachbarschaftspartikel + Abstandsvektoren erstellen
             std::vector<std::vector<int>> neighbor_idsFibre(n_particlesFibre);
             std::vector<std::vector<float>> distancesFibre(n_particlesFibre);
-	        Eigen::VectorXi wandpart2(n_particlesFibre); //eigentlich erst für Wandpartikel (Fluid-Faser-Interaktion)
+            Eigen::VectorXi local_wandpart2(endFibre - startFibre + 1); //eigentlich erst für Wandpartikel (Fluid-Faser-Interaktion)
 
-            //Nachbarsuche Faser
-            calculateNeighborhood(positionsFibre, positionsFibre, SMOOTHING_LENGTH, neighbor_idsFibre, distancesFibre);
+            //----Dichte eines Partikels anhand der Nachbarn berechnen------
+            Eigen::VectorXf local_densitiesFibre(endFibre - startFibre + 1);
+            local_densitiesFibre.setZero();
 
-            //Dichte eines Partikels anhand der Nachbarn berechnen
-            calculateDensities(n_particlesFibre, neighbor_idsFibre, densitiesFibre, SMOOTHING_LENGTH_FIBRE, distancesFibre, PARTICLE_MASS_FIBRE, 0, n_particlesFibre);
+            if (iter == 0 || boolmovementFibre)
+            {
+                //---------Nachbarsuche Faser-----------
+                neighborhoodMPI(positionsFibre, positionsFibre, SMOOTHING_LENGTH, neighbor_idsFibre, distancesFibre, startFibre, endFibre);
+
+                //---------Density Faser-----------
+                calculateDensities(neighbor_idsFibre, local_densitiesFibre, SMOOTHING_LENGTH_FIBRE, distancesFibre, PARTICLE_MASS_FIBRE, startFibre, endFibre);
+            }               
+            //------------Calculate physical Properties of geometry----------------
+
+            //------------Neighbour-Search for fluid particles---------------------
+            std::vector<std::vector<int>> neighbor_ids(n_particles); //store neighbour ids
+            std::vector<std::vector<float>> distances(n_particles); //store distance of neighbours
+            Eigen::VectorXi local_wandpart(end - start + 1); //checking for particles directly next to a wall
+            
+            neighborhoodMPI(positions, positions, SMOOTHING_LENGTH, neighbor_ids, distances, start, end);
+            //------------Neighbour-Search for fluid particles---------------------
+
+            //------------Neighbour-Search for geometry particles---------------------
+            std::vector<std::vector<int>> neighbor_idsFluidFibre(n_particles);
+            std::vector<std::vector<float>> distancesFluidFibre(n_particles);
+
+            neighborhoodMPI(positions, positionsFibre, SMOOTHING_LENGTH_FIBRE, neighbor_idsFluidFibre, distancesFluidFibre, start, end);
+            //------------Neighbour-Search for geometry particles---------------------
+
+            //------------Calculate Particle density-------------------------
+            Eigen::VectorXf local_densities(end - start + 1);
+            local_densities.setZero();
+
+            DensityKernelParticle(neighbor_ids, local_densities, distances, SMOOTHING_LENGTH, PARTICLE_MASS, start, end);
+            float meandensity = local_densities.mean();
+            //------------Calculate Particle density-------------------------
+
+            //------------Calculate corrected Particle density---------------
+            Eigen::VectorXf local_densities_corr(end - start + 1);
+            local_densities_corr.setZero();
+
+            DensityCorrectedParticle(neighbor_ids, local_densities_corr, distances, SMOOTHING_LENGTH, PARTICLE_MASS, local_densities, start, end);
+            //------------Calculate corrected Particle density---------------
+
+            //------------Check for boundary particles---------------
+            Eigen::VectorXf local_randpart(end - start + 1);
+            local_randpart.setZero();
+
+            CheckBoundaryParticle(neighbor_idsFluidFibre, local_randpart, local_densities, distancesFluidFibre, SMOOTHING_LENGTH_FIBRE, PARTICLE_MASS_FIBRE, start, end);
+            //------------Check for boundary particles---------------
+
+            //------------Initialize Additional matrix---------------
+            Eigen::VectorXf local_pressures = ISOTROPIC_EXPONENT * (local_densities.array() - BASE_DENSITY); //calculation of fluid pressure
+            
+            Eigen::MatrixXf local_forces = Eigen::MatrixXf::Zero(end - start + 1, 3); //Initialise forces
+            
+            removeOwnElement(neighbor_ids, distances, start, end);
+            removeOwnElement(neighbor_idsFluidFibre, distancesFluidFibre,  start, end);
+
+            //------------Initialize Additional matrix---------------
+
+            // Gather densities
+            Eigen::VectorXf densities = gather_data_vector(local_densities, MPI_FLOAT, rank, size);
+
+            // Gather pressures
+            Eigen::VectorXf pressures = gather_data_vector(local_pressures, MPI_FLOAT, rank, size);
+
+            //------------initialize Gradient of Colorfield (for surface tension)---------
+            Eigen::MatrixXf local_gradColorField(end - start + 1, 3);
+            local_gradColorField.setZero(); 
+
+            ColorFieldKernel(neighbor_ids, local_gradColorField, positions, distances, SMOOTHING_LENGTH, PARTICLE_MASS, densities, start, end);
+            //------------initialize Gradient of Colorfield (for surface tension)---------
+
+            // Gather densities_corr
+            Eigen::VectorXf densities_corr = gather_data_vector(local_densities_corr, MPI_FLOAT, rank, size);
+
+            // Gather gradColorField
+            Eigen::MatrixXf gradColorField = gather_data_matrix(local_gradColorField, MPI_FLOAT, rank, size);
+
+            //----------------------Calculate Forces between fluid particles---------------------------------------------------
+            ForcesFluid(neighbor_ids,distances,positions,pressures,densities,velocities,local_forces,SMOOTHING_LENGTH,PARTICLE_MASS,
+                        viscosity_artificial,DYNAMIC_VISCOSITY,BASE_DENSITY,artificial_surface_tension_cohesion,artificial_surface_tension_curvature,
+                        SURFACE_TENSION,density_gas,cw, CONSTANT_FORCE, velocity_gas, gradColorField, start, end);
+            //----------------------Calculate Forces between fluid particles---------------------------------------------------
+            
+            //Temporary controll for adhesion
+            Eigen::VectorXf local_adhesion(end - start + 1);
+            local_adhesion.setZero();
+            
+            //Calculate Forces between fluid and geometry-----------------------------------------------    
+            ForcesFluidGeometry(neighbor_idsFluidFibre, distancesFluidFibre, positions, positionsFibre, velocities, velocitiesFibre, densities, 
+                                local_forces, local_adhesion, SMOOTHING_LENGTH, SMOOTHING_LENGTH_FIBRE, PARTICLE_MASS, PARTICLE_MASS_FIBRE, viscosity_artificial,
+                                DYNAMIC_VISCOSITY_FIBRE, BASE_DENSITY, artificial_surface_tension_adhesion, LJP_DISTANCE, LJP_P1, LJP_P2, LJP_COEF, start, end);
+
+            // Gather forces
+            Eigen::MatrixXf forces = gather_data_matrix(local_forces, MPI_FLOAT, rank, size);
+
+            // Gather randpart
+            Eigen::VectorXf randpart = gather_data_vector(local_randpart, MPI_FLOAT, rank, size);
+
+            // Gather wandpart
+            Eigen::VectorXi wandpart = gather_data_vectorInt(local_wandpart, MPI_INT, rank, size);
+
+            // Gather adhesion
+            Eigen::VectorXf adhesion = gather_data_vector(local_adhesion, MPI_FLOAT, rank, size);
+
+            // Local velocities for particles assigned to this process
+            Eigen::MatrixXf local_positions(end - start + 1, 3);
+            Eigen::MatrixXf local_velocities(end - start + 1, 3);
+
+            //update particle velocities based on acting forces
+            local_velocities = updateVelocities(velocities, forces, TIME_STEP_LENGTH, start, end);
+
+            //temporary: delete very high and very low movements-----------------
+            deleteunneccessaryparticles(local_velocities, forces, start, end);
+
+            // Gather velocities
+            velocities = gather_data_matrix(local_velocities, MPI_FLOAT, rank, size);
+
+            //update particle postions based on calculated velocities
+            local_positions = updatePositions(positions, velocities, TIME_STEP_LENGTH, start, end);
+
+            // Gather positions
+            positions = gather_data_matrix(local_positions, MPI_FLOAT, rank, size);
+
+            if ((count == 1) || (count == 300) || (count == 600)){
+                std::cout << "Run " << count << " successful for rank " << rank << "\n";
+            }
+
+            //----------------------Save results for postprocessing-------------------------
+            if (rank == 0)
+            {
+                if (iter % PLOT_EVERY == 0)
+                {
+                    // Set vtk file paths and save VTK files
+                    std::cout << "Saving VTK data... ";
+                    std::cout << "particles, ";
+                    std::string vtkFilename = particleFolder; // Use the created particle folder
+                    saveParticleAsVTK(vtkFilename, CURR_TIME, n_particles, positions, velocities, pressures, densities, densities_corr, gradColorField, forces, randpart, wandpart, adhesion);
+                    
+                    std::cout << "fibre \n";
+                    vtkFilename = fibreFolder; // Use the created fibre folder
+                    saveFibreAsVTK(vtkFilename, CURR_TIME, n_particlesFibre, positionsFibre);
+                    // std::cout << "vtk, ";
+                    // //Save in .vtk style for postprocessing with ParaView -> change path
+                    // std::string mainfolder = "D:/BUW/Thesis/Program/03_main/SPH-Parallelisation/data/";
+                    // std::string folderending_part = "/particles/";
+                    // std::string folderending_fibre = "/fibre/";
+                    // std::cout << " particles, ";
+                    // std::string vtkFilename = mainfolder + foldername + folderending_part;
+                    // saveParticleAsVTK(vtkFilename, CURR_TIME, n_particles, positions, velocities, pressures, densities, densities_corr, gradColorField, forces, randpart, wandpart, adhesion);
+                    // std::cout << " fibre \n";
+                    // vtkFilename = mainfolder + foldername + folderending_fibre;
+                    // saveFibreAsVTK(vtkFilename, CURR_TIME, n_particlesFibre, positionsFibre);
+                    
+                    //Progressbar in terminal for longer calculations
+                    progressBar(CURR_TIME, SIM_TIME);
+                    std::cout << "Time: " << CURR_TIME << " delta T: " << TIME_STEP_LENGTH << std::endl;
+                }
+            }
+            //----------------------Save results for postprocessing-------------------------
+
+            //----------------------Timestep adjustments-----------------------
+            //TIME_STEP_LENGTH = calculateTimestepLength(velocities, forces, n_particles, SMOOTHING_LENGTH, COURANT); //calculate timestep length based on Courantnumber
+            iter += 1;
+            CURR_TIME += TIME_STEP_LENGTH;
+            count += 1;
+            //----------------------Timestep adjustments-----------------------
+
+            n_particles = removeParticle(velocities, positions, DOMAIN_X_LIM(0), DOMAIN_X_LIM(1), DOMAIN_Y_LIM(0), DOMAIN_Y_LIM(1), DOMAIN_Z_LIM(0), DOMAIN_Z_LIM(1)); //remove Particles outside the boundaries
         }
-		//------------Calculate physical Properties of geometry----------------
-		
-		//------------Neighbour-Search for fluid particles---------------------
-        std::vector<std::vector<int>> neighbor_ids(n_particles); //store neighbour ids
-        std::vector<std::vector<float>> distances(n_particles); //store distance of neighbours
-	    Eigen::VectorXi wandpart(n_particles); //checking for particles directly next to a wall
         
-        calculateNeighborhood(positions, positions, SMOOTHING_LENGTH, neighbor_ids, distances); //neighboursearch with thread-parallelisation
-		//------------Neighbour-Search for fluid particles---------------------
+        //-----------------------------End of timekeeping and simulation----------------------
+        // Closing the barrier for the timing
+        MPI_Barrier(MPI_COMM_WORLD);
+        finishtime = MPI_Wtime();
 
-        //------------Neighbour-Search for geometry particles---------------------
-        std::vector<std::vector<int>> neighbor_idsFluidFibre(n_particles);
-        std::vector<std::vector<float>> distancesFluidFibre(n_particles);
-        
-        calculateNeighborhood(positions, positionsFibre, SMOOTHING_LENGTH_FIBRE, neighbor_idsFluidFibre, distancesFluidFibre);
-		//------------Neighbour-Search for geometry particles---------------------
+        if (rank == 0) {
+            double elapsed_time = finishtime - starttime;
+	    printf("Time used by the CPU = %e seconds \n\n", elapsed_time);
 
-        //------------Calculate Particle density-------------------------
-        Eigen::VectorXf densities = DensityKernelParticle(n_particles, neighbor_ids, distances, SMOOTHING_LENGTH, PARTICLE_MASS);
-        
-        float meandensity = densities.mean();
-		//------------Calculate Particle density-------------------------
-
-        //------------Calculate corrected Particle density---------------
-        Eigen::VectorXf densities_corr = DensityCorrectedParticle(n_particles, neighbor_ids, distances, SMOOTHING_LENGTH, PARTICLE_MASS, densities);
-        //------------Calculate corrected Particle density---------------
-
-        //------------Check for boundary particles---------------
-        Eigen::VectorXf randpart = CheckBoundaryParticle(n_particles, neighbor_idsFluidFibre,distancesFluidFibre, SMOOTHING_LENGTH_FIBRE, PARTICLE_MASS_FIBRE);
-		//------------Check for boundary particles---------------
-
-		//------------Initialize Additional matrix---------------
-        Eigen::VectorXf pressures = ISOTROPIC_EXPONENT * (densities.array() - BASE_DENSITY); //calculation of fluid pressure
-        Eigen::MatrixXf forces = Eigen::MatrixXf::Zero(n_particles, 3); //Initialise forces
-        removeOwnElement(neighbor_ids, distances,0, n_particles); //remove own element from the neighbour list
-        removeOwnElement(neighbor_idsFluidFibre, distancesFluidFibre,0, n_particles);
-		//------------Initialize Additional matrix---------------
-
-        //------------initialize Gradient of Colorfield (for surface tension)---------
-        Eigen::MatrixXf gradColorField = ColorFieldKernel(n_particles, neighbor_ids, positions, distances, SMOOTHING_LENGTH, PARTICLE_MASS, densities);
-		//------------initialize Gradient of Colorfield (for surface tension)---------
-
-        //----------------------Calculate Forces between fluid particles---------------------------------------------------
-        ForcesFluid(n_particles,neighbor_ids,distances,positions,pressures,densities,velocities,forces,SMOOTHING_LENGTH,PARTICLE_MASS,
-                    viscosity_artificial,DYNAMIC_VISCOSITY,BASE_DENSITY,artificial_surface_tension_cohesion,artificial_surface_tension_curvature,
-                    SURFACE_TENSION,density_gas,cw, CONSTANT_FORCE, velocity_gas, gradColorField, count);
-		//----------------------Calculate Forces between fluid particles---------------------------------------------------
-        
-        //Temporary controll for adhesion
-        Eigen::VectorXf adhesion(n_particles);
-        adhesion.setZero();
-		
-		//Calculate Forces between fluid and geometry-----------------------------------------------    
-        ForcesFluidGeometry(n_particles, neighbor_idsFluidFibre, distancesFluidFibre, positions, positionsFibre, velocities, velocitiesFibre, densities, 
-                            forces, adhesion, SMOOTHING_LENGTH, SMOOTHING_LENGTH_FIBRE, PARTICLE_MASS, PARTICLE_MASS_FIBRE, viscosity_artificial,
-                            DYNAMIC_VISCOSITY_FIBRE, BASE_DENSITY, artificial_surface_tension_adhesion, LJP_DISTANCE, LJP_P1, LJP_P2, LJP_COEF, count);
-
-        //update particle velocities based on acting forces
-        updateVelocities(velocities, forces, n_particles, TIME_STEP_LENGTH, 0, n_particles);
-
-        //temporary: delete very high and very low movements-----------------
-        deleteunneccessaryparticles(n_particles, velocities, forces);
-
-        //update particle postions based on calculated velocities
-        updatePositions(positions, velocities, n_particles, TIME_STEP_LENGTH, 0, n_particles); 
-
-		//----------------------Save results for postprocessing-------------------------
-        if (iter % PLOT_EVERY == 0)
-        {
-            std::cout << "vtk \n";
-            //Save in .vtk style for postprocessing with ParaView -> change path
-            std::string mainfolder = "D:/BUW/Thesis/Program/03_main/SPH-Parallelisation/data/";
-            std::string folderending_part = "/particles/";
-            std::string folderending_fibre = "/fibre/";
-            std::cout << "particles \n";
-            std::string vtkFilename = mainfolder + foldername + folderending_part;
-            saveParticleAsVTK(vtkFilename, CURR_TIME, n_particles, positions, velocities, pressures, densities, densities_corr, gradColorField, forces, randpart, wandpart, adhesion);
-            std::cout << "fibre \n";
-            vtkFilename = mainfolder + foldername + folderending_fibre;
-            saveFibreAsVTK(vtkFilename, CURR_TIME, n_particlesFibre, positionsFibre);
-			
-			//Progressbar in terminal for longer calculations
-			progressBar(CURR_TIME, SIM_TIME);
-			std::cout << "Time: " << CURR_TIME << " delta T: " << TIME_STEP_LENGTH << std::endl;
+        // Update the CSV file with nprocs and time
+            updateTimeCSV(size, elapsed_time);
+            std::cout << "ENDE mit final count: " << count << std::endl;
         }
-		//----------------------Save results for postprocessing-------------------------
-		
-		//----------------------Timestep adjustments-----------------------
-		iter += 1;
-		CURR_TIME += TIME_STEP_LENGTH;
-        count += 1;
-		//----------------------Timestep adjustments-----------------------
 
-        n_particles = removeParticle(velocities, positions, DOMAIN_X_LIM(0), DOMAIN_X_LIM(1), DOMAIN_Y_LIM(0), DOMAIN_Y_LIM(1), DOMAIN_Z_LIM(0), DOMAIN_Z_LIM(1)); //remove Particles outside the boundaries
+        //-----------------------------End of timekeeping and simulation----------------------
+        MPI_Finalize();
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "Exception on rank " << rank << ": " << e.what() << std::endl;
+        MPI_Abort(MPI_COMM_WORLD, 1);
+        return 1;
+    } catch (...) {
+        std::cerr << "Unknown exception on rank " << rank << std::endl;
+        MPI_Abort(MPI_COMM_WORLD, 1);
+        return 1;
     }
-	
-	//-----------------------------End of timekeeping and simulation----------------------
-    auto stop = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
-    std::cout << "\nTime taken by process: " << float(duration.count()) / 1000.0 << " seconds\n" << std::endl;
-    std::cout << "\nfinal count" << count << std::endl;    
-    std::cout << "\nENDE\n\n";
-	//-----------------------------End of timekeeping and simulation----------------------
-	
-    return 0;
 }

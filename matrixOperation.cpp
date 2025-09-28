@@ -1,14 +1,16 @@
 #include <iostream>
 #include <vector>
 #include <Eigen/Dense>
+#include <thread>
 #include "matrixOperation.h"
+#include <mpi.h>
 
-void calculateNeighborhood(const Eigen::MatrixXf& positions1, const Eigen::MatrixXf& positions2, float SMOOTHING_LENGTH, std::vector<std::vector<int>>& int_neighbor, std::vector<std::vector<float>>& int_distances)
+void neighborhoodMPI(const Eigen::MatrixXf& positions1, const Eigen::MatrixXf& positions2, float SMOOTHING_LENGTH, std::vector<std::vector<int>>& int_neighbor, std::vector<std::vector<float>>& int_distances, int start, int end)
 {
     int n_particles1 = positions1.rows();
     int n_particles2 = positions2.rows();
-
-    for (int i = 0; i < n_particles1; ++i) {
+ 
+    for (int i = start; i <= end; ++i) {
         std::vector<int> neighbors;
         std::vector<float> dists;
 
@@ -23,19 +25,7 @@ void calculateNeighborhood(const Eigen::MatrixXf& positions1, const Eigen::Matri
 
         int_neighbor[i] = neighbors;
         int_distances[i] = dists;
-
     }
-}
-
-void removeRow(Eigen::MatrixXf& matrix, unsigned int rowToRemove)
-{
-    unsigned int numRows = matrix.rows() - 1;
-    unsigned int numCols = matrix.cols();
-
-    if (rowToRemove < numRows)
-        matrix.block(rowToRemove, 0, numRows - rowToRemove, numCols) = matrix.bottomRows(numRows - rowToRemove);
-
-    matrix.conservativeResize(numRows, numCols);
 }
 
 float euclideanDistance(const Eigen::VectorXf& p1, const Eigen::VectorXf& p2) {
@@ -54,7 +44,7 @@ float euclideanDistance(const Eigen::VectorXf& p1, const Eigen::VectorXf& p2) {
 
 void removeOwnElement(std::vector<std::vector<int>>& int_neighbor, std::vector<std::vector<float>>& int_distances, int start, int end)
 {
-    for (int i = start; i < end; ++i) {
+    for (int i = start; i <= end; ++i) {
         int currentValue = i;
         for (int j = 0; j < int_neighbor[i].size(); ++j) {
             if (int_neighbor[i][j] == currentValue) {

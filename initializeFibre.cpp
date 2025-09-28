@@ -4,8 +4,9 @@
 #include <vector>
 #include "initializeFibre.h"
 #include <algorithm>
+#include <mpi.h>
 
-Eigen::MatrixXf generateVerticalFibre(Eigen::MatrixXf& positions_fibre, Eigen::MatrixXf& velocities_fibre)
+std::pair<Eigen::MatrixXf, Eigen::MatrixXf> generateVerticalFibre(Eigen::MatrixXf& positions_fibre, Eigen::MatrixXf& velocities_fibre)
 {
     //-----------Geometrieeinstellungen vertikale Faser (Fluid)----------
     int num_height = 25;
@@ -42,10 +43,10 @@ Eigen::MatrixXf generateVerticalFibre(Eigen::MatrixXf& positions_fibre, Eigen::M
         }
     }
 
-    return positions_fibre, velocities_fibre;
+    return std::make_pair(positions_fibre, velocities_fibre);
 }
 
-Eigen::MatrixXf generateHorizontalFibre(Eigen::MatrixXf& positions_fibre, Eigen::MatrixXf& velocities_fibre)
+std::pair<Eigen::MatrixXf, Eigen::MatrixXf> generateHorizontalFibre(Eigen::MatrixXf& positions_fibre, Eigen::MatrixXf& velocities_fibre)
 {
     //-----------Geometrieeinstellungen vertikale Faser (Fluid)----------
     int num_height = 85;
@@ -75,10 +76,10 @@ Eigen::MatrixXf generateHorizontalFibre(Eigen::MatrixXf& positions_fibre, Eigen:
         }
     }
 
-    return positions_fibre, velocities_fibre;
+    return std::make_pair(positions_fibre, velocities_fibre);
 }
 
-Eigen::MatrixXf generateFlatSurface(Eigen::MatrixXf& positions_fibre, Eigen::MatrixXf& velocities_fibre)
+std::pair<Eigen::MatrixXf, Eigen::MatrixXf> generateFlatSurface(Eigen::MatrixXf& positions_fibre, Eigen::MatrixXf& velocities_fibre)
 {
     float height = 0;
     int n_rows = 40;
@@ -109,48 +110,17 @@ Eigen::MatrixXf generateFlatSurface(Eigen::MatrixXf& positions_fibre, Eigen::Mat
                 }
             }  
         }
-    /*
-    float position = -14.1e-6;
-    n_rows = 40;
-    n_columns = 80; //40
-    n_height = 1;
-    Eigen::RowVector2f SPAWN2_X_LIM(-3.5e-6,3.5e-6);
-    Eigen::RowVector2f SPAWN2_Y_LIM(0,1e-6); //3.5
-    Eigen::RowVector2f SPAWN2_Z_LIM(0,14e-6);
-
-    std::cout << "\nInitialisiere Geometrie(Ebene)...\n";
-        for (int i = 0; i < n_rows; ++i)
-        {
-            for (int j = 0; j < n_columns; ++j)
-            {
-                for (int k = 0; k < n_height; k++)
-                {
-                    float x = SPAWN2_X_LIM(0) + (SPAWN2_X_LIM(1) - SPAWN2_X_LIM(0)) * (i / static_cast<float>(n_rows - 1));
-                    float y = SPAWN2_Y_LIM(0);
-                    float z = SPAWN2_Z_LIM(0) + (SPAWN2_Z_LIM(1) - SPAWN2_Z_LIM(0)) * (j / static_cast<float>(n_columns - 1));
-
-                    positions_fibre(index_nr, 0) = x;
-                    positions_fibre(index_nr, 1) = y + position;
-                    positions_fibre(index_nr, 2) = z;
-                    velocities_fibre.row(index_nr) << 0.0f, 0.0f, 0.0f;
-
-                    ++index_nr;
-                }
-            }  
-        }*/
-
-    return positions_fibre, velocities_fibre;
+    return std::make_pair(positions_fibre, velocities_fibre);
 }
 
-Eigen::MatrixXf generateSTLFibre(Eigen::MatrixXf& positions_fibre, Eigen::MatrixXf& velocities_fibre, int* n_part_fibre)
+std::pair<Eigen::MatrixXf, Eigen::MatrixXf> generateSTLFibre(Eigen::MatrixXf& positions_fibre, Eigen::MatrixXf& velocities_fibre, int* n_part_fibre)
 {
     std::cout << "\n\nRead STL data...\n\n";
-
     std::ifstream file("Fibre.stl");
 
     if (!file.is_open()) {
         std::cout << "\n\nFehler beim Öffnen der Datei!\n\n" << std::endl;
-        return positions_fibre, velocities_fibre;
+        return std::make_pair(positions_fibre, velocities_fibre);
     }
 
     std::vector<Eigen::Vector3f> vertices;
@@ -188,6 +158,5 @@ Eigen::MatrixXf generateSTLFibre(Eigen::MatrixXf& positions_fibre, Eigen::Matrix
 	//Change size of fibre_Matrix to actually necessary fibre particles
     positions_fibre.conservativeResize(n_particles, Eigen::NoChange);
     velocities_fibre.conservativeResize(n_particles, Eigen::NoChange);
-
-    return positions_fibre, velocities_fibre;
+    return std::make_pair(positions_fibre, velocities_fibre);
 }

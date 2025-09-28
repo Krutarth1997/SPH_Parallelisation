@@ -6,8 +6,10 @@
 #include <random>
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
+#include <thread>
 #include <chrono>
 #include "kernel.h"
+#include <mpi.h>
 
 float CubicSplineKernel(float dist, float smooth)
 {
@@ -144,7 +146,6 @@ float CohesionKernel(float dist, float smooth)
 
 float AdhesionKernel(float dist, float smooth)
 {
-	//if (dist > 0.5 * smooth && dist <= smooth)
 	if (dist <= smooth)
 	{
 		double norm = 0.007 / pow(smooth,3.25);
@@ -160,56 +161,47 @@ float DensityKernel(float dist, float smooth)
 	return CubicSplineKernel(dist, smooth);
 }
 
-Eigen::MatrixXf DensityKernelParticle(int n_particles, const std::vector<std::vector<int>>& neighbor_ids, const std::vector<std::vector<float>>& distances, float SMOOTHING_LENGTH, float PARTICLE_MASS)
+Eigen::MatrixXf DensityKernelParticle(const std::vector<std::vector<int>>& neighbor_ids, Eigen::VectorXf& densities, const std::vector<std::vector<float>>& distances, float SMOOTHING_LENGTH, float PARTICLE_MASS, int start, int end)
 {
-    Eigen::VectorXf densities(n_particles);
-    densities.setZero();
-
-    for (int i = 0; i < n_particles; ++i)
-    {
-        for (int j_in_list = 0; j_in_list < neighbor_ids[i].size(); ++j_in_list)
-        {
-            float kernel_value = CubicSplineKernel(distances[i][j_in_list], SMOOTHING_LENGTH);
-            densities(i) += kernel_value * PARTICLE_MASS;
-        }
-    }
-
+	for (int i = start; i <= end; ++i)
+	{
+		int local_index = i - start;
+		for (int j_in_list = 0; j_in_list < neighbor_ids[i].size(); ++j_in_list)
+		{
+			float kernel_value = CubicSplineKernel(distances[i][j_in_list], SMOOTHING_LENGTH);
+			densities(local_index) += kernel_value * PARTICLE_MASS;
+		}
+	}
 	return densities;
 }
 
-Eigen::MatrixXf DensityCorrectedParticle(int n_particles, const std::vector<std::vector<int>>& neighbor_ids, const std::vector<std::vector<float>>& distances, float SMOOTHING_LENGTH, float PARTICLE_MASS, Eigen::VectorXf densities)
+Eigen::MatrixXf DensityCorrectedParticle(const std::vector<std::vector<int>>& neighbor_ids, Eigen::VectorXf& densities_corr, const std::vector<std::vector<float>>& distances, float SMOOTHING_LENGTH, float PARTICLE_MASS, Eigen::VectorXf densities, int start, int end)
 {
-	Eigen::VectorXf densities_corr(n_particles);
-    densities_corr.setZero();
-
-    for (int i = 0; i < n_particles; ++i)
+    for (int i = start; i <= end; ++i)
 	{
+		int local_index = i - start;
         for (int j_in_list = 0; j_in_list < neighbor_ids[i].size(); ++j_in_list)
 		{
             float kernel_value = CubicSplineKernel(distances[i][j_in_list], SMOOTHING_LENGTH);
-            densities_corr(i) += (PARTICLE_MASS * kernel_value) / ((PARTICLE_MASS/densities[i]) * kernel_value);
+            densities_corr(local_index) += (PARTICLE_MASS * kernel_value) / ((PARTICLE_MASS/densities[local_index]) * kernel_value);
         }
     }
-
 	return densities_corr;
 }
 
-Eigen::MatrixXf CheckBoundaryParticle(int n_particles, const std::vector<std::vector<int>>& neighbor_idsFluidFibre, const std::vector<std::vector<float>>& distancesFluidFibre, float SMOOTHING_LENGTH_FIBRE, float PARTICLE_MASS_FIBRE)
+Eigen::MatrixXf CheckBoundaryParticle(const std::vector<std::vector<int>>& neighbor_idsFluidFibre, Eigen::VectorXf& randpart, Eigen::VectorXf& densities, const std::vector<std::vector<float>>& distancesFluidFibre, float SMOOTHING_LENGTH_FIBRE, float PARTICLE_MASS_FIBRE, int start, int end)
 {
-	Eigen::VectorXf randpart(n_particles);
-	randpart.setZero();
-
-	for (int i = 0; i < n_particles; ++i)
+	for (int i = start; i <= end; ++i)
 	{
+		int local_index = i - start;
 		for (int j_in_list = 0; j_in_list < neighbor_idsFluidFibre[i].size(); ++j_in_list)
 		{
 			float kernel_value = DensityKernel(distancesFluidFibre[i][j_in_list], SMOOTHING_LENGTH_FIBRE);
-			randpart(i) += kernel_value * PARTICLE_MASS_FIBRE;
+			randpart(local_index) += kernel_value * PARTICLE_MASS_FIBRE;
 		}
 	}
-
+	randpart += densities;
 	return randpart;
- //Here we have to change randpart += densities; and return something
 }
 
 float DensityCorrectedKernel(float dist, float smooth)
@@ -217,32 +209,34 @@ float DensityCorrectedKernel(float dist, float smooth)
 	return CubicSplineKernel(dist, smooth);
 }
 
-Eigen::MatrixXf ColorFieldKernel(int n_particles, const std::vector<std::vector<int>>& neighbor_ids, const Eigen::MatrixXf& positions, const std::vector<std::vector<float>>& distances, float SMOOTHING_LENGTH, float PARTICLE_MASS, Eigen::VectorXf densities)
-{
-	Eigen::MatrixXf gradColorField(n_particles, 3);
-    gradColorField.setZero();
-    for (int i = 0; i < n_particles; ++i)
+Eigen::MatrixXf ColorFieldKernel(const std::vector<std::vector<int>>& neighbor_ids, Eigen::MatrixXf& gradColorField, const Eigen::MatrixXf& positions, const std::vector<std::vector<float>>& distances, float SMOOTHING_LENGTH, float PARTICLE_MASS, Eigen::VectorXf densities, int start, int end)
+{	
+    for (int i = start; i <= end; ++i)
 	{
+		int local_index = i - start;
 		for (int j_in_list = 0; j_in_list < neighbor_ids[i].size(); ++j_in_list)
 		{
-			int j = neighbor_ids[i][j_in_list];
+            int j = neighbor_ids[i][j_in_list]; // Global index of the neighbor
+
 			float kernel_value = CubicSplineDifKernel(distances[i][j_in_list], SMOOTHING_LENGTH);
-			gradColorField.row(i) += kernel_value * SMOOTHING_LENGTH * (PARTICLE_MASS / densities(j)) * ((positions.row(j) - positions.row(i)) / distances[i][j_in_list]);
+			gradColorField.row(local_index) += kernel_value * SMOOTHING_LENGTH *
+												(PARTICLE_MASS / densities(j)) *
+												((positions.row(j) - positions.row(i)) / distances[i][j_in_list]);
 		}
 	}
 
     //Delete NaN-Values
-    for (int i=0; i<n_particles;i++)
+    for (int i = start; i <= end; ++i)
 	{
+		int local_index = i - start;
 		for (int j =0; j<3;j++)
 		{
-			if (std::isnan(gradColorField.coeff(i, j)))
+			if (std::isnan(gradColorField.coeff(local_index, j)))
 			{
-				gradColorField(i,j) = 0.0f;
+				gradColorField(local_index,j) = 0.0f;
 			}
 		}
 	}
-
 	return gradColorField;
 }
 
