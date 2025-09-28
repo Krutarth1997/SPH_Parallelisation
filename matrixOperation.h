@@ -3,14 +3,13 @@
 
 #include <iostream>
 #include <vector>
-#include <Eigen/Dense>
 
-void calculateNeighborhood(const Eigen::MatrixXf& positions1, const Eigen::MatrixXf& positions2, float SMOOTHING_LENGTH, std::vector<std::vector<int>>& neighbor_idsFluidFibre, std::vector<std::vector<float>>& distancesFluidFibre);
+__global__ void calculateNeighborhoodKernelff(float* positions1, float* positions2, int* neighbor_ids, float* distances, int n_particles1, int n_particles2, float smoothing_length, int* total_neighbors);
 
-void removeRow(Eigen::MatrixXf& matrix, unsigned int rowToRemove);
-float euclideanDistance(const Eigen::VectorXf& p1, const Eigen::VectorXf& p2);
+__global__ void calculateNeighborhoodKernelfifi(float* positions1, float* positions2, int* neighbor_ids, float* distances, int* d_n_particles1, int* d_n_particles2, float smoothing_length, int* total_neighbors);
 
-void removeOwnElement(std::vector<std::vector<int>>& int_neighbor, std::vector<std::vector<float>>& int_distances, int start, int end);
-float removeParticle(Eigen::MatrixXf& velocities, Eigen::MatrixXf& positions, float boundary_x0, float boundary_x1, float boundary_y0, float boundary_y1, float boundary_z0,float boundary_z1);
+__global__ void calculateNeighborhoodKernelffi(float* positions1, float* positions2, int* neighbor_ids, float* distances, int n_particles1, int* d_n_particles2, float smoothing_length, int* total_neighbors);
+
+__global__ void RemoveOwnElementKernel(int* neighbor_ids, float* distances, int n_particles, int* total_neighbor);
 
 #endif 

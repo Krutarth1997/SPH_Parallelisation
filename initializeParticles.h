@@ -1,19 +1,18 @@
 #ifndef INITIALIZEPARTICLES_H
 #define INITIALIZEPARTICLES_H
 
-#include <Eigen/Dense>
 #include <iostream>
 
-Eigen::MatrixXf generateBoxFlow(Eigen::MatrixXf& positions, Eigen::MatrixXf& velocities);
+std::pair<std::vector<float>, std::vector<float>> generateBoxFlow(std::vector<float>& positions, std::vector<float>& velocities);
 
-Eigen::MatrixXf generateSphericalParticles(Eigen::MatrixXf& positions, Eigen::MatrixXf& velocities);
+std::pair<std::vector<float>, std::vector<float>> generateSphericalParticles(std::vector<float>& positions, std::vector<float>& velocities, int n_particles);
 
-Eigen::MatrixXf generateSemiSphericalParticles(Eigen::MatrixXf& positions, Eigen::MatrixXf& velocities);
+std::pair<std::vector<float>, std::vector<float>> generateSemiSphericalParticles(std::vector<float>& positions, std::vector<float>& velocities, int n_particles);
 
-Eigen::MatrixXf generateVerticalFibreFluid(Eigen::MatrixXf& positions, Eigen::MatrixXf& velocities);
+std::pair<std::vector<float>, std::vector<float>> generateVerticalFibreFluid(std::vector<float>& positions, std::vector<float>& velocities);
 
-Eigen::MatrixXf generateNewParticlesDroplet(Eigen::MatrixXf& positions, Eigen::MatrixXf& velocities, int n_new_particles);
+std::pair<std::vector<float>, std::vector<float>> generateNewParticlesDroplet(std::vector<float>& positions, std::vector<float>& velocities, int n_particles, int n_new_particles);
 
-Eigen::MatrixXf generateWettedFibreHorizontal(Eigen::MatrixXf& positions, Eigen::MatrixXf& velocities);
+std::pair<std::vector<float>, std::vector<float>> generateWettedFibreHorizontal(std::vector<float>& positions, std::vector<float>& velocities, int n_particles);
 
 #endif

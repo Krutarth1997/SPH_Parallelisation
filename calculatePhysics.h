@@ -1,16 +1,17 @@
 #ifndef CALCULATEPHYSICS_H
 #define CALCULATEPHYSICS_H
 
-#include <Eigen/Dense>
 #include <vector>
 #include <iostream>
+#include <cuda_runtime.h>
+#include <curand_kernel.h>
+#include <cublas_v2.h>
 
-void calculateDensities(int int_particles, std::vector<std::vector<int>>& int_neighbor, Eigen::VectorXf& int_densities, float int_smoothing_length, std::vector<std::vector<float>>& int_distances, float int_particle_mass, int start, int end);
+__global__ void calculateDensities(int* int_neighbors, float* int_densities, float int_smoothing_length,
+                        float* int_distances, float int_particle_mass, int* d_n_particles, int* total_neighbors);
 
-void updateVelocities(Eigen::MatrixXf& int_velocities, Eigen::MatrixXf& int_forces, int int_particles, float int_timestep, int start, int end);
+__global__ void updateVelocities(float* velocities, float* forces, float timestep, int n_particles);
 
-void updatePositions(Eigen::MatrixXf& int_positions, Eigen::MatrixXf& int_velocities, int int_particles, float int_timestep, int start, int end);
-
-float calculateTimestepLength(Eigen::MatrixXf& int_velocities, Eigen::MatrixXf& int_forces, int int_particles, float int_smooth, float Co);
+__global__ void updatePositions(float* positions, float* velocities, float timestep, int n_particles);
 
 #endif

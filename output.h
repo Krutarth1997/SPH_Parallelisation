@@ -1,14 +1,12 @@
 #ifndef OUTPUT_H
 #define OUTPUT_H
 
-#include <Eigen/Dense>
 #include <iostream>
 
-void saveParticleAsVTK(const std::string& path, float timestep, int n_particles, const Eigen::MatrixXf& positions, const Eigen::MatrixXf& velocities,
-const Eigen::VectorXf& pressure, const Eigen::VectorXf& density, const Eigen::VectorXf& density_corr, const Eigen::MatrixXf& gradColorfield,
-const Eigen::MatrixXf& forces, const Eigen::VectorXf& randpart, const Eigen::VectorXi& wandpart, const Eigen::VectorXf& adhesion);
+void saveParticleAsVTK(const std::string& path, float timestep, int n_particles, float* positions, float* velocities,
+float* density, float* randpart, float* pressures, float* density_corr, float* gradColorField, float* forces, int* wandpart, float* adhesion);
 
-void saveFibreAsVTK(const std::string& path, float timestep, int n_particles, const Eigen::MatrixXf& positions);
+void saveFibreAsVTK(const std::string& path, float timestep, int n_particles, float* positions);
 
 void progressBar(float iter, float timestep);
 

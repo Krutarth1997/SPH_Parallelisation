@@ -1,20 +1,20 @@
 #ifndef INITIALIZEFIBRE_H
 #define INITIALIZEFIBRE_H
 
-#include <Eigen/Dense>
 #include <iostream>
 #include <fstream>
 #include <vector>
+#include <tuple>
 #include <algorithm>
 
-Eigen::MatrixXf generateVerticalFibre(Eigen::MatrixXf& positions_fibre, Eigen::MatrixXf& velocities_fibre);
+std::pair<std::vector<float>, std::vector<float>> generateVerticalFibre(std::vector<float>& positions_fibre, std::vector<float>& velocities_fibre);
 
-Eigen::MatrixXf generateHorizontalFibre(Eigen::MatrixXf& positions_fibre, Eigen::MatrixXf& velocities_fibre);
+std::pair<std::vector<float>, std::vector<float>> generateHorizontalFibre(std::vector<float>& positions_fibre, std::vector<float>& velocities_fibre);
 
-Eigen::MatrixXf generateFlatSurface(Eigen::MatrixXf& positions_fibre, Eigen::MatrixXf& velocities_fibre);
+std::pair<std::vector<float>, std::vector<float>> generateFlatSurface(std::vector<float>& positions_fibre, std::vector<float>& velocities_fibre);
 
-Eigen::MatrixXf generateSTLFibre(Eigen::MatrixXf& positions_fibre, Eigen::MatrixXf& velocities_fibre, int* n_part_fibre);
+std::tuple<std::vector<float>, std::vector<float>, int> generateSTLFibre(std::vector<float>& positions_fibre, std::vector<float>& velocities_fibre, int n_part_fibre);
 
-bool compareEigenVector(const Eigen::Vector3f& a, const Eigen::Vector3f& b);
+bool compareVector(const std::vector<float>& a, const std::vector<float>& b);
 
 #endif 
